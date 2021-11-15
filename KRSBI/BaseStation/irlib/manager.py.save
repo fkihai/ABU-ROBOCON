@@ -1,0 +1,656 @@
+import netCore as nc from time import sleep from math import * 
+import threading as th from time import time,sleep,localtime 
+import copy
+
+data = {}
+loop = False
+
+CAM_RES = [640, 480]
+
+LOW_SPEED = 60
+MED_SPEED = 80
+FAST_SPEED = 100
+
+
+# STRATEGY
+GOAL_POS = [300, 900, 0]
+
+HOME_POS = {
+	'r2': [0,0,0],
+	'r3': [600, 0, 0] 
+}
+
+CENTER_POS = [300, 400, 0]
+
+CORNER_POS = {
+	'rx': [300, 500, 0],
+	'r2.r': [500, 800, -45],
+	'r2.l': [100, 800, 45]
+}
+
+FREE_KICK_POS = {
+	'r2': [150, 400, 20],
+	'r3': [450, 400, -20]
+}
+
+KO_POS_2 = {
+	'r2': [200, 400, -10],
+	'r3': [400, 400, 45]
+}
+
+OP_FREE_KICK_POS = {
+	'r2': [250, 200,0],
+	'r3': [350,400,0]
+}
+FINALTI_POS = {
+	'r2': [300,450,0]
+}
+KO_POS = {
+	'r2': [100, 400, 0],
+	'r3': [300, 350, 0]
+}
+
+KO_POS_START = {
+	'r2': [300, 600, 180],
+	'r3': [300, 500, 180]
+}
+KO_POS_OP = {
+	'r2': [200,200,0],
+	'r3': [450,200,0]
+}
+
+DROP_BALL_RANGE = {
+	'r2': 120,
+	'r3': 120
+}
+
+KICK_OFF_RANGE = {
+	'r2': 0,
+	'r3': 0
+}
+
+NORMAL_RANGE = {
+	'r2': 0,
+	'r3': 0
+}
+
+DEFEND_POS = {
+	'r2': [150,200,0],
+	'r3': [450,200,0]
+}
+
+READY_POS = {
+	'r2': [150,200,0],
+	'r3': [450,200,0]
+}
+
+nc.__init('172.16.34.1', 'bt') #ip basestation
+nc.subscribe('r2')
+nc.subscribe('r3')
+
+def start(rID):
+	print "Manager: start"
+	mThread = th.Thread(target=main, args=(rID,))
+	mThread.daemon = True
+	mThread.start()
+
+def whileNe(rID, data, rStatus):
+	global loop
+
+
+	loop = True
+	nc.clearData()
+
+	sTime = time()
+	while True:
+		msg = nc.readData(rID)
+		if msg != None:
+			sTime = time()
+			# nc.publish(data)
+			if msg['status'] == rStatus:
+				break
+
+		if (time() - sTime) > 3:
+			print rID, "Offline"
+			break
+		sleep(0.01)
+
+	
+def r3Home():
+	print "Manager: 3Home"
+
+	global loop
+
+	loop = False
+	data = {}
+	data['r3'] = {'CMD': 'Setxyt', 'pos': HOME_POS['r3']}
+	nc.publish(data)
+
+def r2Home():
+	print "Manager: r2Home"
+
+	global loop
+
+	loop = False
+	data = {}
+	data['r2'] = {'CMD': 'Setxyt', 'pos': HOME_POS['r2']}
+	nc.publish(data)
+
+def opCorner():
+	pos = copy.deepcopy(DEFEND_POS)
+	pos2 = pos['r2']
+	pos3 = pos['r3']
+
+	pos2[2] = 135
+	pos3[2] = -135
+
+	data = {}
+	data['r2'] = {'CMD': 'Goxyt', 'pos': pos2, 'speed':FAST_SPEED}
+	data['r3'] = {'CMD': 'Goxyt', 'pos': pos3, 'speed':FAST_SPEED}
+
+	nc.publish(data)
+
+def corner():
+	print "Manager: r2 corner"
+	data = {}
+
+	while nc.readData('r2') == None:
+		print "Manager: Waiting position fix"
+		sleep(0.05)
+
+
+	pos = nc.readData('r2')['pos']
+	nc.clearData()
+
+	pos[2] = 0
+	data['r2'] = {'CMD': 'Goxyt', 'pos': pos, 'speed':FAST_SPEED}
+	data['r3'] = {'CMD': 'Goxyt', 'pos': DEFEND_POS['r3'], 'speed': FAST_SPEED}
+	nc.publish(data)
+
+	while True:
+		r2 = nc.readData('r2')
+		print "Manager: Corner Waiting Heading"
+		if r2 != None:
+			nc.clearData()
+			if r2['pos'][2] > -8 and r2['pos'][2] < 8:
+				break
+
+		sleep(0.05)
+
+	data['r2'] = {'CMD':'Goxyt', 'pos': CORNER_POS['rx'], 'speed':MED_SPEED}
+	nc.publish(data)
+
+	r2 = None
+	while True:
+		r2 = nc.readData('r2')
+		print "Manager: Waiting Corner Pos"
+		if r2 != None:
+			nc.clearData()
+			print r2
+			if ( ( (r2['pos'][0] > CORNER_POS['rx'][0] - 50 and r2['pos'][0] < CORNER_POS['rx'][0] + 50) and
+				 (r2['pos'][1] > CORNER_POS['rx'][1] - 50 and r2['pos'][1] < CORNER_POS['rx'][1] + 50) )):
+				break
+		sleep(0.05)
+
+	print "Position Corner FIX"
+	data['r2'] = {'CMD': 'Track', 'speed':MED_SPEED, 'range':DROP_BALL_RANGE['r2'], 'drib':False}
+	nc.publish(data)
+
+def startCorner():
+	print "Manager: Start Corner"
+	data = {}
+	data['r2'] = {'CMD': 'Track', 'speed':LOW_SPEED, 'range':NORMAL_RANGE['r2'], 'drib':True}
+	nc.publish(data)
+
+	whileNe('r2', data, 'Tracking Finish')
+
+	start('r2')
+
+def freeKick():
+	print "Manager: FreeKick"
+	DroppedBall('r2')
+
+def startFreeKick():
+	startCorner()
+
+def opFreeKick():
+	opThrowIn()
+
+def goalKick():
+	print "Manager: FreeKick"
+	while nc.readData('r2') == None and nc.readData('r3') == None:
+		print "Waiting Position Fix"
+
+	print "Position Fix"
+
+	if nc.readData('r2')['pos'][1] > nc.readData('r3')['pos'][1]:
+		strID = 'r2'
+		kickID = 'r3'
+	else:
+		strID = 'r3'
+		kickID = 'r2'
+
+	data[kickID] = {'CMD': 'Track', 'range':DROP_BALL_RANGE[kickID], 'speed':FAST_SPEED, 'drib': False}
+	data[strID] = {'CMD': 'Goxyt', 'pos': FREE_KICK_POS[strID], 'speed':FAST_SPEED}
+
+	nc.publish(data)
+
+	return kickID
+
+def startGoalKick(kickID):
+	print "Manager: Start FreeKick #", kickID
+	data = {}
+	if kickID == 'r2':
+		strID = 'r3'
+	else:
+		strID = 'r2'
+
+	while True:
+		rKick = nc.readData(kickID)
+
+		if rKick != None:
+			nc.clearData()
+
+			if rKick['track'] == 0:
+				# data = {}
+				pos = rKick['pos']
+				heading = -1 * degrees(atan2(GOAL_POS[0]-pos[0], GOAL_POS[1]-pos[1]))
+
+				if heading > 0:
+					heading = heading - (heading / 4.0)
+				else :
+					heading = heading + (heading / 4.0)
+				#print pos, "\t", heading, "\t\t",
+				if pos[2] > (heading - 5) and pos[2] < (heading + 5):
+					print "Kick"
+					data[kickID] = {'CMD':'Kick','pwm' : 100}
+					nc.publish(data)
+					whileNe(kickID, data, 'Kick')
+					break
+				else:
+					pos[2] = heading
+					data[kickID] = {'CMD':'Goxyt', 'speed':MED_SPEED, 'pos':pos}
+					nc.publish(data)
+					print "Pointing", data
+			else:
+				data[kickID] = {'CMD': 'Track', 'speed':FAST_SPEED, 'range':NORMAL_RANGE[kickID], 'drib':True}
+				nc.publish(data)
+
+		sleep(0.1)
+
+	start(strID)
+
+def opGoalKick():
+	print "Manager: opGoalKick"
+	data = {}
+	data['r2'] = {'CMD': 'Goxyt', 'pos': OP_FREE_KICK_POS['r2'], 'speed':FAST_SPEED}
+	data['r3'] = {'CMD': 'Goxyt', 'pos': OP_FREE_KICK_POS['r3'], 'speed':FAST_SPEED}
+	nc.publish(data)
+
+def penalty():
+	print "Manager: Finalti"
+	data = {}
+	data['r2'] = {'CMD': 'Goxyt', 'pos': FINALTI_POS['r2'], 'speed':FAST_SPEED}
+	nc.publish(data)
+
+def startPenalty():
+	print "Manager: Start Penalty"
+
+	data = {}
+	data['r2'] = {'CMD': 'Track', 'speed':FAST_SPEED, 'range':DROP_BALL_RANGE['r2'], 'drib':False}
+	nc.publish(data)
+
+	whileNe('r2', data, 'Tracking Finish')
+
+	data = {}
+	data['r2'] = {'CMD': 'Track', 'speed':LOW_SPEED, 'range':KICK_OFF_RANGE['r2'], 'drib':False}
+	nc.publish(data)
+	whileNe('r2', data, 'Tracking')
+
+	whileNe('r2', data, 'Tracking Finish')
+
+	nc.clearData()
+	while nc.readData('r2') == None:
+		print "Waiting position fix"
+		sleep(0.01)
+
+	pos = nc.readData('r2')['pos']
+	pos[2] = 0
+	data['r2'] = {'CMD': 'Goxyt', 'pos': pos, 'speed':LOW_SPEED}
+	nc.publish(data)
+
+	nc.clearData()
+	while True:
+		r2 = nc.readData('r2')
+		print "Manager: Corner Waiting Heading"
+		if r2 != None:
+			nc.clearData()
+			print r2
+			if r2['pos'][2] > -8 and r2['pos'][2] < 8:
+				break
+
+		sleep(0.05)
+
+	data['r2'] = {'CMD': 'Kick','pwm': 100}
+	nc.publish(data)
+
+	whileNe('r2', data, 'Kick')
+
+	data['r2'] = {'CMD': 'Goxyt', 'pos': FINALTI_POS['r2'], 'speed':FAST_SPEED}
+	nc.publish(data)
+
+def OpKickOff():
+	print "Manager: OpKickOff"
+
+	global loop
+	loop = False
+	data['r2'] = {'CMD': 'Goxyt', 'pos': KO_POS_OP['r2'], 'speed':FAST_SPEED}
+	data['r3'] = {'CMD': 'Goxyt', 'pos': KO_POS_OP['r3'], 'speed':FAST_SPEED}
+	nc.publish(data)
+
+def engineOff():
+	print "Manger: Engine Off"
+	data = {}
+	data['r2'] = {'CMD':'EngineOff'}
+	data['r3'] = {'CMD':'EngineOff'}
+
+	nc.publish(data)
+
+def backHome():
+	print "Manager: backHome"
+	global loop
+	loop = False
+	data['r2'] = {'CMD': 'Goxyt', 'pos': HOME_POS['r2'], 'speed':FAST_SPEED}
+	data['r3'] = {'CMD': 'Goxyt', 'pos': HOME_POS['r3'], 'speed':FAST_SPEED}
+	nc.publish(data)
+	
+def Stop():
+	print "Manager: Stop"
+
+	global loop
+	loop = False
+	data = {}
+	data['r2'] = {'CMD':'Stop'}
+	data['r3'] = {'CMD':'Stop'}
+	nc.publish(data)
+
+def Ready():
+	print "Manager : Robot Ready"
+	global loop
+
+	loop = False
+
+	data['r2'] = {'CMD': 'Goxyt', 'pos': READY_POS['r2'], 'speed':FAST_SPEED}
+	data['r3'] = {'CMD': 'Goxyt', 'pos': READY_POS['r3'], 'speed':FAST_SPEED}
+	nc.publish(data)
+def startTracking():
+	print "Manger: Robot Start"
+	global loop
+	loop = False
+	data['r3'] = {'CMD': 'Goxyt', 'pos': DEFEND_POS['r3'], 'speed':FAST_SPEED}
+	data['r2'] = {'CMD': 'Track', 'speed':FAST_SPEED, 'range':NORMAL_RANGE['r2'], 'drib':True}
+	nc.publish(data)
+
+def throwIn():
+	DroppedBall('r2')
+
+def startThrowIn():
+	startCorner()
+
+def opThrowIn():
+	data = {}
+	data['r2'] = {'CMD': 'Goxyt', 'pos': DEFEND_POS['r2'], 'speed':FAST_SPEED}
+	data['r3'] = {'CMD': 'Goxyt', 'pos': DEFEND_POS['r3'], 'speed':FAST_SPEED}
+	nc.publish(data)
+
+def DroppedBall(rID):
+	print "Manger: DroppedBall"
+	global loop
+	rID = 'r2'
+	data = {}
+	data['r3'] = {'CMD': 'Goxyt', 'pos': DEFEND_POS['r3'], 'speed':FAST_SPEED}
+	data['r2'] = {'CMD': 'Goxyt', 'pos': DEFEND_POS['r2'], 'speed':FAST_SPEED}
+	nc.publish(data)
+
+def kickOff2():
+	print "Manager: kickOff2"
+	global loop
+
+	loop = False
+
+	data['r2'] = {'CMD': 'Goxyt', 'pos': KO_POS_2['r2'], 'speed':FAST_SPEED}
+	data['r3'] = {'CMD': 'Goxyt', 'pos': KO_POS_2['r3'], 'speed':FAST_SPEED}
+	nc.publish(data)
+
+def startKickOff2(kickID):
+	print "Manager: startKickOff2"
+	data = {}
+
+	if kickID == 'r2':
+		strID = 'r3'
+	else:
+		strID = 'r2'
+
+	data[kickID] = {'CMD': 'Track', 'speed':MED_SPEED, 'range':KICK_OFF_RANGE[kickID], 'drib':False}
+	nc.publish(data)
+	print "Manager: r3 Tracking", KICK_OFF_RANGE[kickID]
+	whileNe(kickID, data, 'Tracking')
+	whileNe(kickID, data, 'Tracking Finish')
+	print "Manager: r3 Tracking Finish"
+
+	data[kickID] = {'CMD': 'Kick', 'pwm': 10}
+	nc.publish(data)
+	print "Manager: r3 Kick"
+	whileNe(kickID, data, 'Kick')
+
+	data[strID] = {'CMD': 'Track', 'speed':FAST_SPEED, 'range':NORMAL_RANGE[strID], 'drib':True}
+	data[kickID] = {'CMD': 'Goxyt', 'pos': DEFEND_POS[kickID], 'speed':FAST_SPEED}
+	nc.publish(data)
+
+	whileNe(kickID, data, 'Goto Position')
+	print "Manager: r3 defend, r2 track"
+	start(strID)
+
+#Kick OFF
+def kickOff():
+	print "Manager: kickOff"
+
+	global loop
+
+	loop = False
+
+	data['r2'] = {'CMD': 'Goxyt', 'pos': KO_POS['r2'], 'speed':FAST_SPEED}
+	data['r3'] = {'CMD': 'Goxyt', 'pos': KO_POS['r3'], 'speed':FAST_SPEED}
+	nc.publish(data)
+
+def startKickOff(kickID):
+	print "Manager: startKickOff"
+	global loop
+
+	loop = False
+
+	if kickID == 'r2':
+		strID = 'r3'
+	else:
+		strID = 'r2'
+
+	data = {}
+	data[strID] = {'CMD': 'Goxyt', 'pos': KO_POS_START[strID], 'speed':FAST_SPEED}
+	nc.publish(data)
+	print "Manager: r2 Ke koordinat start kickoff"
+
+	while True:
+		pos = nc.readData(strID)['pos'][2]
+		if pos > 100  and pos < 180 or pos > -180 and pos < -100:
+			break
+	data = {}
+	data[kickID] = {'CMD': 'Track', 'speed':LOW_SPEED, 'range':KICK_OFF_RANGE[kickID], 'drib':False}
+	nc.publish(data)
+	print "Manager: r3 Tracking", KICK_OFF_RANGE[kickID]
+
+	whileNe(kickID, data, 'Tracking')
+
+
+	print "Manager: r3 Tracking Finish"
+	data[kickID] = {'CMD': 'Kick', 'pwm': 10 }
+	nc.publish(data)
+	print "Manager: r3 Kick"
+
+	whileNe(kickID, data, 'Kick')
+	data[strID] = {'CMD': 'Track', 'speed':FAST_SPEED, 'range':NORMAL_RANGE[strID], 'drib':True}
+	data[kickID] = {'CMD': 'Goxyt', 'pos': DEFEND_POS[kickID], 'speed':FAST_SPEED}
+	nc.publish(data)
+	whileNe(kickID, data, 'Goto Position')
+	start(strID)
+
+def MotionBall():
+	print "Manager: MotionBall"
+
+	cnt = 0
+	Time = 0
+	LastTime = 0
+	while True:
+		Time = localtime(time())[5]
+		if Time != LastTime:
+			cnt += 1
+		LastTime = Time
+		if cnt > 7:
+			break
+		sleep(1)
+
+
+def main(strID):
+	global loop
+
+	if strID == 'r2':
+		dfdID = 'r3'
+	else:
+		dfdID = 'r2'
+
+	loop = True
+	trackTimeOut = time()
+	swapTime = time()
+	lastKick = time()
+
+	data = {}
+	while loop:
+		rStr = nc.readData(strID)
+		rDfd = nc.readData(dfdID)
+
+		if rStr != None and rDfd != None:
+			nc.clearData()
+
+			pos = rDfd['pos']
+			rpos = rDfd['pos']
+			# Cek jika defender sudah kembali ke posisi bertahan
+			
+			if ( (pos[0] > DEFEND_POS[dfdID][0] - 20 and  pos[0] < DEFEND_POS[dfdID][0] + 20) and
+				 (pos[1] > DEFEND_POS[dfdID][1] - 20 and  pos[1] < DEFEND_POS[dfdID][1] + 20) ):
+				if rDfd['ball'] != 0:
+					# data = {}
+					ball = rDfd['ball']
+
+					# rad = atan2((CAM_RES[0] / 2.0) - ball[0], NORMAL_RANGE[dfdID] - ball[1])
+					# heading = degrees(rad)
+					
+					if rDfd['ball'] > 20 :
+						pos[2] += 5
+					elif rDfd['ball'] < 0:
+						pos[2] -= 5		
+					data[dfdID] = {'CMD': 'Goxyt', 'pos': pos, 'speed':FAST_SPEED}
+					nc.publish(data)
+				else:
+					if rStr['ball'] != 0:
+						# data = {}
+						strPos = rStr['pos']
+
+						rad = atan2(strPos[0] - pos[0], strPos[1] - pos[1])
+						heading = -1 * degrees(rad)		# Inverse heading
+						pos[2] = heading
+
+						data[dfdID] = {'CMD':'Goxyt', 'speed':MED_SPEED, 'pos':pos}
+						nc.publish(data)
+					else:
+						pos[2] = 0
+						data[dfdID] = {'CMD':'Goxyt', 'speed':MED_SPEED, 'pos':pos}
+						nc.publish(data)
+			else:
+				data[dfdID] = {'CMD':'Goxyt', 'speed':MED_SPEED, 'pos':DEFEND_POS[dfdID]}
+				nc.publish(data)
+				
+
+			if rStr['track'] == 0:
+				#if rStr['cap'] > 300 and (time() - lastKick) > 2:
+					# data = {}
+
+				pos = rStr['pos']
+				heading = -1 * degrees(atan2(GOAL_POS[0]-pos[0], GOAL_POS[1]-pos[1]))
+
+				if heading > 0:
+					heading = heading - (heading / 4.0)
+				else :
+					heading = heading + (heading / 4.0)
+					#print pos, "\t", heading, "\t\t",
+				if pos[2] > (heading - 5) and pos[2] < (heading + 5):
+					print "Kick"
+					data[strID] = {'CMD':'Kick','pwm': 100}
+					nc.publish(data)
+					whileNe(strID, data, 'Kick')
+					#lastKick = time()
+					print "heading : ", heading
+				else:
+					pos[2] = heading
+					data[strID] = {'CMD':'Goxyt', 'speed':MED_SPEED, 'pos':pos}
+					nc.publish(data)
+					print "Pointing", GOAL_POS
+					
+				'''else:
+					# data = {}
+					pos = copy.deepcopy(GOAL_POS)
+					pos[1] = pos[1] + 100
+					data[strID] = {'CMD':'Goxyt', 'speed':MED_SPEED, 'pos':pos}
+					nc.publish(data)'''
+	
+			else:
+				# Cek jika defender sudah kembali ke posisi bertahan
+				if ((time() - swapTime) > 3) and (rDfd['ball'] > 0 and rStr['ball'] < 50):
+					# data = {}
+					if ( (rpos[0] > DEFEND_POS[dfdID][0] - 20 and  rpos[0] < DEFEND_POS[dfdID][0] + 20) and
+						 (rpos[1] > DEFEND_POS[dfdID][1] - 20 and  rpos[1] < DEFEND_POS[dfdID][1] + 20) ):
+	 					swapTime = time()
+						tmp = strID
+						strID = dfdID
+						dfdID = tmp
+
+						data[dfdID] = {'CMD':'Goxyt', 'speed':MED_SPEED, 'pos':DEFEND_POS[dfdID]}
+						nc.publish(data)
+
+						whileNe(dfdID, data, 'Goto Position')
+				else:
+					# data = {}
+
+					if rStr['ball'] != 0:
+						print "Manager: Striker Tracking"
+						trackTimeOut = time()
+						data[strID] = {'CMD': 'Track', 'speed':FAST_SPEED, 'range':NORMAL_RANGE[strID], 'drib':True}
+					else:
+						if (time() - trackTimeOut) < 50:
+							print "Manager: Tracking with timeout"
+							data[strID] = {'CMD': 'Track', 'speed':FAST_SPEED, 'range':NORMAL_RANGE[strID], 'drib':True}
+						else:
+							print "Manager: Striker Timeout, ",
+							pos = rStr['pos']
+
+							if ( (pos[0] > DEFEND_POS[strID][0] - 20 and  pos[0] < DEFEND_POS[strID][0] + 20) and
+								 (pos[1] > DEFEND_POS[strID][1] - 20 and  pos[1] < DEFEND_POS[strID][1] + 20) ):
+	 							data[strID] = {'CMD': 'Track', 'speed':FAST_SPEED, 'range':NORMAL_RANGE[strID], 'drib':True}
+							elif pos[2] > -20 and pos[2] < 20:
+								print "Defend to ", DEFEND_POS[strID]
+								data[strID] = {'CMD':'Goxyt', 'speed':MED_SPEED, 'pos':DEFEND_POS[strID]}
+							else:
+								pos[2] = 0
+								print "Pointing to ", pos
+								data[strID] = {'CMD':'Goxyt', 'speed':MED_SPEED, 'pos':pos}
+					nc.publish(data)
+
+		sleep(0.05)
