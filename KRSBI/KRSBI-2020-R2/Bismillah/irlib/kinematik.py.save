@@ -1,0 +1,42 @@
+'''
+update : 6 feb 2019
+err : putaran roda tidak sesuai, cannot display CLI
+solution deletes display for threshold
+
+update 9 feb 2019 (TRACKING)
+(-) : arah robot, mundur (x,-y), maju
+(+) arah robot (kecepatan sudut atau omega)
+
+'''
+
+from math import *
+import omni as vs
+import engine as en
+
+##sudut
+v1 = 30
+v2 = 150
+v3 = 270
+#SPEED = [0,0,0]
+
+
+def speed_out(rx,ry):
+    PWM_Out = [0]*3
+    '''
+    Doc Number python : https://belajarpython.com/tutorial/number-python
+    '''
+    # Kembali atan (y / x), di radian (KONVERSI DARI DERAJAT KE RADIAN)
+    
+    tetha = atan2(ry,rx)
+   # w = v/tetha 
+    rx = [ v1 * cos(tetha),]
+    ry = v1 * sin(tetha)
+    PWM_Out[0]=((int(-rx)) *-1 )  # belakang
+    PWM_Out[1]=((int((float(0.5) * rx) - (float(0.8660) * ry))) *-1 )  # kanan
+    PWM_Out[2]=((int((float(0.5) * rx) + (float(0.8660) * ry))) * -1 ) #kiri
+    print (PWM_Out[0],PWM_Out[1],PWM_Out[2])
+    return (PWM_Out[0],PWM_Out[1],PWM_Out[2])
+    
+    
+    
+   
